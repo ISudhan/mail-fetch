@@ -257,20 +257,3 @@ Example output:
 ## 📄 License
 
 MIT — free to use and modify.
-
-
-
-# Check if it's running
-systemctl --user status outlook-attachment-monitor
-
-# View live logs
-journalctl --user -u outlook-attachment-monitor -f
-
-# Stop it
-systemctl --user stop outlook-attachment-monitor
-
-# Start it manually
-systemctl --user start outlook-attachment-monitor
-
-# Remove auto-start completely
-python install_startup.py --remove
