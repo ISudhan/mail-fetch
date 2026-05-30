@@ -146,6 +146,15 @@ class ExcelConfig:
                 return rows.iloc[0].to_dict()
         return None
 
+    def lookup_client(self, client_name: str) -> Optional[dict]:
+        """Return the Clients sheet row for *client_name* (case-insensitive)."""
+        if self._clients.empty:
+            return None
+        name = client_name.strip().lower()
+        mask = self._clients["Client Name"].str.strip().str.lower() == name
+        rows = self._clients[mask]
+        return rows.iloc[0].to_dict() if not rows.empty else None
+
     @property
     def emails_df(self) -> pd.DataFrame:
         return self._emails
@@ -160,17 +169,33 @@ class FolderResolver:
         self.excel = excel
 
     def _client_folder(self, client_name: str) -> str:
-        """Find existing client folder across HNIs, or create under default."""
-        for hni_path in config.HNI_MAP.values():
-            candidate = os.path.join(hni_path, client_name)
-            if os.path.isdir(candidate):
-                log.debug("Found existing client folder: %s", candidate)
-                return candidate
-        # Create under default
-        new_path = os.path.join(config.HNI_MAP[config.DEFAULT_HNI_KEY], client_name)
-        log.info("Creating new client folder: %s", new_path)
-        Path(new_path).mkdir(parents=True, exist_ok=True)
-        return new_path
+        """Resolve the client folder using the 'Server' column as source of truth."""
+        # ── 1. Look up the Server key from the Clients sheet ─────────────────
+        client_row = self.excel.lookup_client(client_name)
+        server_key = ""
+        if client_row:
+            server_key = client_row.get("Server", "").strip()
+
+        if not server_key:
+            raise ValueError(
+                f"Client '{client_name}' has no 'Server' value in the Clients sheet. "
+                f"Please set it to one of: {list(config.HNI_MAP.keys())}"
+            )
+        if server_key not in config.HNI_MAP:
+            raise ValueError(
+                f"Client '{client_name}' has Server='{server_key}' which is not in "
+                f"HNI_MAP. Valid keys: {list(config.HNI_MAP.keys())}"
+            )
+
+        # ── 2. Use that HNI path — find or create the folder there ───────────
+        base_path = config.HNI_MAP[server_key]
+        client_path = os.path.join(base_path, client_name)
+        if os.path.isdir(client_path):
+            log.debug("Found existing client folder: %s", client_path)
+        else:
+            log.info("Creating new client folder: %s", client_path)
+            Path(client_path).mkdir(parents=True, exist_ok=True)
+        return client_path
 
     def resolve(self, client_name: str, broker_name: Optional[str],
                 received_date: date) -> str:
@@ -277,6 +302,10 @@ class EmailProcessor:
     # ------------------------------------------------------------------
     def process(self, raw_bytes: bytes) -> None:
         try:
+            # Reload Excel config before each email so any new/edited rows
+            # (clients, email addresses) take effect without a restart.
+            self.excel.reload()
+
             msg: EmailMessage = email.message_from_bytes(
                 raw_bytes, policy=email.policy.default)
 
@@ -341,13 +370,17 @@ class EmailProcessor:
                 for cname in client_names:
                     targets.append((cname, broker_display))
             elif broker_names:
-                linked = [r.get("Client Name", "").strip() for r in brokers if r.get("Client Name")]
+                raw_linked = [r.get("Client Name", "").strip() for r in brokers if r.get("Client Name")]
+                # Only use names that actually exist as clients in the Clients sheet
+                linked = [n for n in raw_linked if self.excel.lookup_client(n)]
                 if linked:
                     for cname in linked:
                         targets.append((cname, broker_display))
                 else:
-                    log.warning("Only broker found but no linked clients — cannot route.")
-                    return
+                    log.warning(
+                        "Only broker '%s' found but no valid linked client — "
+                        "routing to unknown-sender folder.", broker_names
+                    )
             else:
                 # ── Fallback: unknown sender — save to new/<sender_email>/FY/ ──
                 sender_addrs = fields.get("From", [])

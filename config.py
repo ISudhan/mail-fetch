@@ -45,9 +45,6 @@ HNI_MAP: dict[str, str] = {
     "HNI2": "/home/sudhan/workspace/mail-fetch/test_clients/Tax HNI 2",
 }
 
-# Default HNI folder when creating a brand-new client
-DEFAULT_HNI_KEY: str = "HNI1"
-
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
