@@ -12,7 +12,7 @@ IMAP_HOST: str = "imap-mail.outlook.com"   # Personal Outlook.com / Hotmail
 IMAP_PORT: int = 993
 IMAP_USE_SSL: bool = True
 
-IMAP_USERNAME: str = "mail"   # Your full Outlook email
+IMAP_USERNAME: str = "nsudhan@outlook.com"   # Your full Outlook email
 
 # OAuth2 — uses Microsoft public client (no Azure app registration required)
 # First run will open a browser for one-time login; token is cached after that.

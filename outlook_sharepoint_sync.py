@@ -285,19 +285,30 @@ class EmailProcessor:
             log.info("Email received: %s", subject)
 
             # Collect attachments first — skip if none
+            # Grab every leaf part that has a filename (covers PDFs, Word, Excel,
+            # images, etc. regardless of Content-Disposition value).
+            # Exception: skip image/* parts that are NOT explicitly marked as
+            # "attachment" — those are typically inline logos/icons embedded in
+            # HTML email bodies.
             attachments: list[tuple[str, bytes]] = []
             for part in msg.walk():
-                disp = part.get_content_disposition() or ""
+                # Skip multipart containers — they hold no payload themselves
+                if part.get_content_maintype() == "multipart":
+                    continue
                 fname = part.get_filename()
-                if fname and "attachment" in disp.lower():
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        attachments.append((fname, payload))
-                elif fname and part.get_content_maintype() != "multipart":
-                    # Inline attachments
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        attachments.append((fname, payload))
+                if not fname:
+                    continue
+                disp = (part.get_content_disposition() or "").lower()
+                maintype = part.get_content_maintype().lower()
+                # Skip inline images (embedded logos / email decorations)
+                if maintype == "image" and "attachment" not in disp:
+                    log.debug("Skipping inline image: %s", fname)
+                    continue
+                payload = part.get_payload(decode=True)
+                if payload:
+                    attachments.append((fname, payload))
+                    log.debug("Queued attachment: %s (%s/%s, disp=%s)",
+                              fname, maintype, part.get_content_subtype(), disp or "none")
 
             if not attachments:
                 log.info("No attachments — skipping.")
