@@ -16,6 +16,7 @@ A production-ready Python automation system that monitors a Microsoft Outlook / 
 - 📝 **Rotating logs** — structured timestamped entries
 - ⚙️ **systemd auto-start** — starts at login, no root required
 - 📦 **Auto dependency install** on first run
+- 📂 **Unknown sender fallback** — saves to `new/<email>/FY/` if not in Excel
 
 ---
 
@@ -27,9 +28,13 @@ mail-fetch/
 ├── config.py                    # All settings (edit this first)
 ├── install_startup.py           # systemd service installer
 ├── requirements.txt             # Python dependencies
+├── Automation_Config.xlsx       # Client/email mapping (you create this)
 ├── automation.log               # Created at runtime
+├── oauth_token_cache.json       # OAuth2 token cache (auto-created, never commit)
 └── README.md
 ```
+
+> ⚠️ `oauth_token_cache.json` and `config.py` contain sensitive credentials. Both are listed in `.gitignore` and must **never** be committed to version control.
 
 ---
 
@@ -38,19 +43,25 @@ mail-fetch/
 Edit **`config.py`** before running:
 
 ```python
-# IMAP Credentials
-IMAP_HOST     = "outlook.office365.com"   # or "imap-mail.outlook.com"
-IMAP_USERNAME = "your_email@domain.com"
-IMAP_PASSWORD = "your_app_password"       # Use App Password if MFA is on
+# IMAP host for personal Outlook.com
+IMAP_HOST     = "imap-mail.outlook.com"
+IMAP_USERNAME = "your_email@outlook.com"
+
+# OAuth2 (no password needed — browser login once)
+OAUTH2_CLIENT_ID = "9e5f94bc-e8a4-4e73-b8be-63364c29d753"
+OAUTH2_TENANT    = "consumers"
 
 # Excel config file path
-EXCEL_CONFIG_PATH = "/home/sudhan/Automation_Config.xlsx"
+EXCEL_CONFIG_PATH = "/home/youruser/Automation_Config.xlsx"
 
 # Folder structure
 HNI_MAP = {
-    "HNI1": "/mnt/clients/Tax HNI 1",
-    "HNI2": "/mnt/clients/Tax HNI 2",
+    "HNI1": "/path/to/Tax HNI 1",
+    "HNI2": "/path/to/Tax HNI 2",
 }
+
+# Unknown senders saved here: <BASE_FOLDER>/new/<sender@email>/FY YYYY-YY/
+UNKNOWN_SENDER_FOLDER = "new"
 ```
 
 ---
@@ -66,58 +77,82 @@ HNI_MAP = {
 
 ### Sheet 2 — `Emails`
 
-| Email Address           | Type   | Client Name  | Domain        |
-|-------------------------|--------|--------------|---------------|
-| broker@zerodha.com      | Broker | Zerodha      | zerodha.com   |
-| john@gmail.com          | Client | John Doe     |               |
+| Email Address           | Type   | Client Name  | Domain          |
+|-------------------------|--------|--------------|-----------------|
+| broker@zerodha.com      | Broker | Zerodha      | zerodha.com     |
+| john@gmail.com          | Client | John Doe     |                 |
 | support@icicidirect.com | Broker | ICICI Direct | icicidirect.com |
 
-> **Rules:** Leave *Domain* blank for client rows. Fill *Domain* for broker rows to match all emails from that broker automatically.
+> **Rules:**
+> - Leave *Domain* blank for client rows.
+> - Fill *Domain* for broker rows to match all emails from that broker automatically.
+> - Unknown senders (not in Excel) are automatically saved to `new/<sender_email>/FY/`.
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Clone / download the project
+### 1. Install dependencies
 
 ```bash
-cd /home/sudhan/workspace/mail-fetch
-```
-
-### 2. Create virtual environment & install dependencies
-
-```bash
+cd /path/to/mail-fetch
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Enable IMAP on Outlook
+### 2. Enable IMAP on your Outlook account
 
-- **Microsoft 365:** outlook.office.com → Settings → Mail → Sync email → Enable IMAP
-- **Outlook.com:** Settings → View all Outlook settings → Mail → Sync email → POP and IMAP
-- **With MFA:** Create an App Password at [account.microsoft.com](https://account.microsoft.com) → Security → App passwords
+- Go to [outlook.office.com](https://outlook.office.com) → Settings → Mail → Sync email → Enable IMAP
+- For personal Outlook.com: Settings → View all Outlook settings → Mail → Sync email → POP and IMAP
 
-### 4. Edit `config.py` with your credentials
+### 3. Edit `config.py` with your email and paths
 
-### 5. Run
+### 4. Run the monitor
 
 ```bash
 source .venv/bin/activate
 python outlook_sharepoint_sync.py
 ```
 
+**First run only:** A Microsoft login prompt will appear in the terminal:
+```
+============================================================
+ Microsoft Login Required
+============================================================
+ 1. Open: https://www.microsoft.com/link
+ 2. Enter code: XXXXXXXX
+============================================================
+```
+Open the URL, enter the code, and sign in. The token is cached — **you won't need to do this again**.
+
 ---
 
-## 🔁 Auto-Start with systemd
+## 🔁 Auto-Start with systemd (run once)
 
-Register the monitor to start automatically at login:
+Register the monitor to start automatically at every login:
 
 ```bash
-python install_startup.py           # install
-python install_startup.py --status  # check status
-python install_startup.py --logs    # live logs
-python install_startup.py --remove  # uninstall
+python install_startup.py
+```
+
+### Manage the service
+
+```bash
+# Check if it's running
+systemctl --user status outlook-attachment-monitor
+
+# View live logs
+journalctl --user -u outlook-attachment-monitor -f
+
+# Stop the monitor
+systemctl --user stop outlook-attachment-monitor
+
+# Start manually
+systemctl --user start outlook-attachment-monitor
+
+# Remove auto-start completely
+python install_startup.py --remove
 ```
 
 ---
@@ -125,17 +160,17 @@ python install_startup.py --remove  # uninstall
 ## 📂 Folder Structure Created
 
 ```
-/mnt/clients/
-└── Tax HNI 1/
+/path/to/clients/
+├── Tax HNI 1/
 │   └── John Doe/
 │       └── FY 2026-27/
 │           ├── Zerodha/
-│           │   └── statement.pdf
-│           └── report.pdf        ← no broker identified
-└── Tax HNI 2/
-    └── ABC Industries/
+│           │   └── statement.pdf      ← broker identified
+│           └── report.pdf             ← no broker
+└── new/
+    └── unknown@gmail.com/
         └── FY 2026-27/
-            └── circular.pdf
+            └── attachment.jpg         ← sender not in Excel
 ```
 
 ---
@@ -144,12 +179,13 @@ python install_startup.py --remove  # uninstall
 
 | Scenario | Condition | Result |
 |----------|-----------|--------|
-| 1 | Broker in FROM, Client in CC/TO/BCC | Save to client's folder under broker subfolder |
-| 2 | Client in FROM, Broker in CC/TO/BCC | Save to client's folder under broker subfolder |
-| 3 | Only client identified | Save to client's FY folder (no broker subfolder) |
-| 4 | Only broker identified | Resolve linked client from Excel, save there |
+| 1 | Broker in FROM, Client in CC/TO | Save to client folder under broker subfolder |
+| 2 | Client in FROM, Broker in CC | Save to client folder under broker subfolder |
+| 3 | Only client identified | Save directly under FY folder |
+| 4 | Only broker identified | Resolve linked client from Excel |
 | 5 | Multiple clients identified | Copy attachment to **all** matched client folders |
-| 6 | No broker identified | Save directly under FY folder |
+| 6 | No broker identified | Save directly under FY (no broker subfolder) |
+| 7 | **Sender not in Excel** | Save to `new/<sender_email>/FY/` automatically |
 
 ### Client Folder Resolution
 
@@ -164,6 +200,7 @@ python install_startup.py --remove  # uninstall
 April 2026 – March 2027  →  FY 2026-27
 April 2027 – March 2028  →  FY 2027-28
 ```
+
 Calculated automatically. No config change needed at year-end.
 
 ---
@@ -174,13 +211,13 @@ Calculated automatically. No config change needed at year-end.
 tail -f automation.log
 ```
 
-Example:
+Example output:
 ```
-2026-05-30 14:30:01 INFO     Email received: Trade confirmation
-2026-05-30 14:30:01 INFO     From: ['broker@zerodha.com']
-2026-05-30 14:30:01 INFO     Matched clients: ['John Doe']
-2026-05-30 14:30:01 INFO     Matched brokers: ['Zerodha']
-2026-05-30 14:30:01 INFO     Attachment saved: /mnt/clients/Tax HNI 1/John Doe/FY 2026-27/Zerodha/statement.pdf
+2026-05-30 13:25:21 INFO     Email received: Trade Confirmation
+2026-05-30 13:25:21 INFO     From: ['broker@zerodha.com']
+2026-05-30 13:25:21 INFO     Matched clients: ['John Doe']
+2026-05-30 13:25:21 INFO     Matched brokers: ['Zerodha']
+2026-05-30 13:25:21 INFO     Attachment saved: .../John Doe/FY 2026-27/Zerodha/statement.pdf
 ```
 
 ---
@@ -189,12 +226,12 @@ Example:
 
 | Symptom | Fix |
 |---------|-----|
-| `AUTHENTICATE failed` | Use App Password if MFA is enabled |
-| `[AUTHENTICATIONFAILED]` | Enable IMAP in Outlook account settings |
-| `ConnectionRefusedError` | Verify `IMAP_HOST` and `IMAP_PORT` |
+| `AUTHENTICATE failed` | Re-run script; complete the browser device-code login |
+| IMAP login loop | Delete `oauth_token_cache.json` and re-authenticate |
 | Excel not found | Check `EXCEL_CONFIG_PATH` in config.py |
-| Folders not created | Check write permissions on the mount point |
+| Folders not created | Check write permissions on the destination path |
 | systemd service failing | `journalctl --user -u outlook-attachment-monitor -xe` |
+| Token expired | Delete `oauth_token_cache.json` — will re-authenticate on next run |
 
 ---
 
@@ -203,28 +240,20 @@ Example:
 | Package | Purpose |
 |---------|---------|
 | `imapclient` | IMAP IDLE real-time monitoring |
+| `msal` | Microsoft OAuth2 authentication |
 | `pandas` | Excel config parsing |
 | `openpyxl` | Excel file reading backend |
+
+---
+
+## 🔒 Security Notes
+
+- **Never commit** `oauth_token_cache.json` or `config.py` — both are in `.gitignore`
+- OAuth2 tokens are stored locally and refresh automatically
+- No passwords are stored anywhere in the codebase
 
 ---
 
 ## 📄 License
 
 MIT — free to use and modify.
-
-
-
-# Check if it's running
-systemctl --user status outlook-attachment-monitor
-
-# View live logs
-journalctl --user -u outlook-attachment-monitor -f
-
-# Stop it
-systemctl --user stop outlook-attachment-monitor
-
-# Start it manually
-systemctl --user start outlook-attachment-monitor
-
-# Remove auto-start completely
-python install_startup.py --remove

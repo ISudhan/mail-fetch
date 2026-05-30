@@ -1,0 +1,22 @@
+# OAuth2 token cache — contains Microsoft access tokens, NEVER commit
+oauth_token_cache.json
+
+# Config contains email credentials
+# config.py   ← uncomment this line if you want to exclude config too
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+automation.log
+*.log
+
+# Test folders
+test_clients/
+
+# OS
+.DS_Store
+Thumbs.db
